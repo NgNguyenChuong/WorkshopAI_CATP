@@ -43,10 +43,25 @@ MODELS = [
         "id": "lm-studio",
         "name": "LM Studio",
         "description": "Ứng dụng giúp tải và chạy model AI trên máy cá nhân.",
-        "filename": "LM-Studio-0.4.21-2-x64.exe",
-        "format": "EXE",
-        "requirement": "Windows 64-bit",
-        "button_label": "Tải LM Studio",
+        "format": "APP",
+        "options": [
+            {
+                "id": "macos",
+                "label": "macOS (Apple Silicon)",
+                "filename": "LM-Studio-0.4.21-2-arm64.dmg",
+                "format": "DMG",
+                "requirement": "macOS · Apple Silicon",
+                "button_label": "Tải bản macOS",
+            },
+            {
+                "id": "windows",
+                "label": "Windows 64-bit",
+                "filename": "LM-Studio-0.4.21-2-x64.exe",
+                "format": "EXE",
+                "requirement": "Windows 64-bit",
+                "button_label": "Tải bản Windows",
+            },
+        ],
     },
 ]
 
@@ -88,9 +103,18 @@ def model_view_data():
     result = []
     for model in MODELS:
         item = dict(model)
-        path = model_path(model)
-        item["available"] = bool(path and path.is_file())
-        item["size"] = format_file_size(path.stat().st_size) if item["available"] else None
+        if model.get("options"):
+            item["options"] = []
+            for option in model["options"]:
+                option_item = dict(option)
+                path = model_path(option)
+                option_item["available"] = bool(path and path.is_file())
+                option_item["size"] = format_file_size(path.stat().st_size) if option_item["available"] else None
+                item["options"].append(option_item)
+        else:
+            path = model_path(model)
+            item["available"] = bool(path and path.is_file())
+            item["size"] = format_file_size(path.stat().st_size) if item["available"] else None
         result.append(item)
     return result
 
@@ -156,39 +180,55 @@ def download_page():
     )
 
 
-@app.get("/download/<model_id>")
-def download_model(model_id):
+def download_error(message, status):
+    return (
+        render_template(
+            "download.html",
+            active_page="download",
+            models=model_view_data(),
+            error=message,
+        ),
+        status,
+    )
+
+
+def send_configured_download(model_id, option_id=None):
     model = next((item for item in MODELS if item["id"] == model_id), None)
-    path = model_path(model) if model else None
+    target = model
+    if model and model.get("options"):
+        target = next((item for item in model["options"] if item["id"] == option_id), None)
+    elif option_id is not None:
+        target = None
+    path = model_path(target) if target else None
 
     if model is None:
-        return (
-            render_template(
-                "download.html",
-                active_page="download",
-                models=model_view_data(),
-                error="Model được yêu cầu không tồn tại.",
-            ),
-            404,
-        )
+        return download_error("Model được yêu cầu không tồn tại.", 404)
+
+    if model.get("options") and target is None:
+        return download_error("Phiên bản LM Studio được yêu cầu không tồn tại.", 404)
 
     if path is None or not path.is_file():
-        return (
-            render_template(
-                "download.html",
-                active_page="download",
-                models=model_view_data(),
-                error=f"Tệp {model['filename']} hiện chưa có trên máy chủ.",
-            ),
-            404,
-        )
+        return download_error(f"Tệp {target['filename']} hiện chưa có trên máy chủ.", 404)
 
     return send_file(
         path,
         as_attachment=True,
-        download_name=model["filename"],
+        download_name=target["filename"],
         conditional=True,
     )
+
+
+@app.get("/download/<model_id>")
+def download_model(model_id):
+    model = next((item for item in MODELS if item["id"] == model_id), None)
+    if model and model.get("options"):
+        return download_error("Vui lòng chọn phiên bản LM Studio trước khi tải.", 400)
+    return send_configured_download(model_id)
+
+
+@app.get("/download/<model_id>/<option_id>")
+def download_model_option(model_id, option_id):
+    return send_configured_download(model_id, option_id)
 
 
 @app.route("/upload", methods=["GET", "POST"])

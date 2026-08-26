@@ -29,6 +29,47 @@
             <h2>{{ model.name }}</h2>
             <p class="model-description">{{ model.description }}</p>
         </div>
+        {% if model.options %}
+        {% set available_options = model.options|selectattr('available')|list %}
+        {% set selected_option = available_options[0] if available_options else model.options[0] %}
+        <div class="platform-picker" data-platform-picker>
+            <label class="options-label" for="platform-{{ model.id }}">Chọn phiên bản</label>
+            <select class="platform-select" id="platform-{{ model.id }}" data-platform-select>
+                {% for option in model.options %}
+                <option value="{{ option.id }}"
+                    data-url="{{ url_for('download_model_option', model_id=model.id, option_id=option.id) }}"
+                    data-size="{{ option.size or 'Chưa có tệp' }}"
+                    data-format="{{ option.format }}"
+                    data-requirement="{{ option.requirement }}"
+                    data-button="{{ option.button_label }}"
+                    {% if not option.available %}disabled{% endif %}
+                    {% if option.id == selected_option.id %}selected{% endif %}>
+                    {{ option.label }}{% if not option.available %} — Chưa có tệp{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <div class="selected-platform" data-platform-details>
+                <span class="format-badge" data-platform-format>{{ selected_option.format }}</span>
+                <dl class="model-details">
+                    <div>
+                        <dt>Kích thước</dt>
+                        <dd data-platform-size>{% if selected_option.available %}{{ selected_option.size }}{% else %}<span class="missing-file">Chưa có tệp</span>{% endif %}</dd>
+                    </div>
+                    <div>
+                        <dt>Yêu cầu</dt>
+                        <dd data-platform-requirement>{{ selected_option.requirement }}</dd>
+                    </div>
+                </dl>
+            </div>
+            <a class="button button-blue button-full{% if not selected_option.available %} button-disabled{% endif %}"
+                data-platform-download
+                href="{% if selected_option.available %}{{ url_for('download_model_option', model_id=model.id, option_id=selected_option.id) }}{% else %}#{% endif %}"
+                {% if not selected_option.available %}aria-disabled="true"{% endif %}>
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v10m0 0 3.5-3.5M10 12 6.5 8.5M3 15v2h14v-2"/></svg>
+                <span data-platform-button>{{ selected_option.button_label }}</span>
+            </a>
+        </div>
+        {% else %}
         <dl class="model-details">
             <div>
                 <dt>Kích thước</dt>
@@ -55,7 +96,12 @@
         </button>
         <p class="availability-note">Tệp {{ model.filename }} chưa được thêm vào máy chủ.</p>
         {% endif %}
+        {% endif %}
     </article>
     {% endfor %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/download.js') }}" defer></script>
 {% endblock %}
