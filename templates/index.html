@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Trang chủ | Model Hub{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <p class="eyebrow">MODEL HUB</p>
+    <h1>Trang chủ</h1>
+    <p>Chọn thao tác bạn muốn thực hiện: tải model hoặc nộp file bài tập.</p>
+</section>
+
+<section class="action-grid" aria-label="Các thao tác">
+    <article class="action-card action-card-blue">
+        <div class="icon-box icon-blue" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v2h14v-2"/></svg>
+        </div>
+        <div class="action-card-copy">
+            <h2>Download</h2>
+            <p>Đi tới trang tải model</p>
+        </div>
+        <a class="button button-blue" href="{{ url_for('download_page') }}">
+            Đi tới trang tải model
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg>
+        </a>
+    </article>
+
+    <article class="action-card action-card-green">
+        <div class="icon-box icon-green" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 14v5h14v-5"/></svg>
+        </div>
+        <div class="action-card-copy">
+            <h2>Upload</h2>
+            <p>Đi tới trang nộp file .zip</p>
+        </div>
+        <a class="button button-green" href="{{ url_for('upload_page') }}">
+            Đi tới trang nộp file .zip
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg>
+        </a>
+    </article>
+</section>
+{% endblock %}

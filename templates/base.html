@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Model Hub - tải model AI và nộp bài tập">
+    <title>{% block title %}Model Hub{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header class="site-header">
+        <nav class="navbar" aria-label="Điều hướng chính">
+            <a class="brand" href="{{ url_for('home') }}" aria-label="Model Hub - Trang chủ">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="img"><path d="M12 2.75 20 7v10l-8 4.25L4 17V7l8-4.25Zm0 2.1L6.25 7.9 12 11l5.75-3.1L12 4.85ZM6 9.55v6.4l5 2.66v-6.37L6 9.55Zm7 9.06 5-2.66v-6.4l-5 2.69v6.37Z"/></svg>
+                </span>
+                <span>Model Hub</span>
+            </a>
+            <div class="nav-links">
+                <a href="{{ url_for('home') }}"{% if active_page == 'home' %} class="active" aria-current="page"{% endif %}>Trang chủ</a>
+                <a href="{{ url_for('download_page') }}"{% if active_page == 'download' %} class="active" aria-current="page"{% endif %}>Tải model</a>
+                <a href="{{ url_for('upload_page') }}"{% if active_page == 'upload' %} class="active" aria-current="page"{% endif %}>Nộp bài</a>
+            </div>
+        </nav>
+    </header>
+
+    <main class="page-shell">
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

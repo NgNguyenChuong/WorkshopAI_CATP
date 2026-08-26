@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Tải model | Model Hub{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <p class="eyebrow">MODEL HUB</p>
+    <h1>Tải model</h1>
+    <p>Chọn model phù hợp và tải xuống.</p>
+</section>
+
+{% if error %}
+<div class="alert alert-error" role="alert">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 3h.01M10.3 4.5 3.5 17a2 2 0 0 0 1.75 3h13.5a2 2 0 0 0 1.75-3L13.7 4.5a2 2 0 0 0-3.4 0Z"/></svg>
+    <span>{{ error }}</span>
+</div>
+{% endif %}
+
+<section class="model-grid" aria-label="Danh sách model">
+    {% for model in models %}
+    <article class="model-card">
+        <div class="model-card-top">
+            <div class="model-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3 4.5 7v10L12 21l7.5-4V7L12 3Zm0 0v8m7.5-4L12 11 4.5 7m7.5 4v10"/></svg>
+            </div>
+            <span class="format-badge">{{ model.format }}</span>
+        </div>
+        <div>
+            <h2>{{ model.name }}</h2>
+            <p class="model-description">{{ model.description }}</p>
+        </div>
+        <dl class="model-details">
+            <div>
+                <dt>Kích thước</dt>
+                <dd>{% if model.available %}{{ model.size }}{% else %}<span class="missing-file">Chưa có tệp</span>{% endif %}</dd>
+            </div>
+            <div>
+                <dt>Định dạng</dt>
+                <dd>{{ model.format }}</dd>
+            </div>
+            <div>
+                <dt>Yêu cầu tối thiểu</dt>
+                <dd>{{ model.requirement }}</dd>
+            </div>
+        </dl>
+        {% if model.available %}
+        <a class="button button-blue button-full" href="{{ url_for('download_model', model_id=model.id) }}">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v10m0 0 3.5-3.5M10 12 6.5 8.5M3 15v2h14v-2"/></svg>
+            {{ model.button_label }}
+        </a>
+        {% else %}
+        <button class="button button-disabled button-full" type="button" disabled>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v10m0 0 3.5-3.5M10 12 6.5 8.5M3 15v2h14v-2"/></svg>
+            {{ model.button_label }}
+        </button>
+        <p class="availability-note">Tệp {{ model.filename }} chưa được thêm vào máy chủ.</p>
+        {% endif %}
+    </article>
+    {% endfor %}
+</section>
+{% endblock %}
