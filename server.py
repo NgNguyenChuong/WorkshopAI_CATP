@@ -54,20 +54,20 @@ MODELS = [
         "format": "APP",
         "options": [
             {
-                "id": "macos",
-                "label": "macOS (Apple Silicon)",
-                "filename": "LM-Studio-0.4.21-2-arm64.dmg",
-                "format": "DMG",
-                "requirement": "macOS · Apple Silicon",
-                "button_label": "Tải bản macOS",
-            },
-            {
                 "id": "windows",
                 "label": "Windows 64-bit",
                 "filename": "LM-Studio-0.4.21-2-x64.exe",
                 "format": "EXE",
                 "requirement": "Windows 64-bit",
                 "button_label": "Tải bản Windows",
+            },
+            {
+                "id": "macos",
+                "label": "macOS (Apple Silicon)",
+                "filename": "LM-Studio-0.4.21-2-arm64.dmg",
+                "format": "DMG",
+                "requirement": "macOS · Apple Silicon",
+                "button_label": "Tải bản macOS",
             },
         ],
     },
