@@ -7,13 +7,19 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
+from queue_manager import DownloadQueue
 
+download_queue = DownloadQueue(max_concurrent=10)
+
+# Chi xep hang voi file lon. File nho tai thang, khong ton slot.
+QUEUE_MIN_BYTES = 100 * 1024 * 1024
 
 BASE_DIR = Path(__file__).resolve().parent
 MODELS_DIR = BASE_DIR / "storage" / "models"
+FILES_DIR = BASE_DIR / "storage" / "files"
 SUBMISSIONS_DIR = BASE_DIR / "storage" / "submissions"
 
 MAX_UPLOAD_MB = 200
@@ -23,21 +29,23 @@ MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MODELS = [
     {
         "id": "model1",
-        "name": "Gemma 3 - Máy yếu",
+        "name": "Gemma 3 - 1B",
         "description": "Phiên bản nhẹ, phù hợp với máy cấu hình thấp.",
-        "filename": "gemma-3-1b-it-Q4_K_M.gguf",
-        "format": "GGUF",
+        "filename": "gemma3-low-model.zip",
+        "format": "ZIP",
         "requirement": "RAM 8GB+",
-        "button_label": "Tải Model 1",
+        "button_label": "Tải Model 1 (.zip)",
+        "download_note": "Giải nén rồi đặt thư mục gemma vào thư mục models của LM Studio.",
     },
     {
         "id": "model2",
-        "name": "Gemma 3 - Máy mạnh",
-        "description": "Phiên bản lớn hơn, dành cho máy có cấu hình mạnh.",
-        "filename": "gemma-3-4b-it-Q4_K_M.gguf",
-        "format": "GGUF",
+        "name": "Gemma 3 - 4B",
+        "description": "Phiên bản lớn hơn, dành cho máy có cấu hình cao.",
+        "filename": "gemma3-high-model.zip",
+        "format": "ZIP",
         "requirement": "RAM 16GB+",
-        "button_label": "Tải Model 2",
+        "button_label": "Tải Model 2 (.zip)",
+        "download_note": "Giải nén rồi đặt thư mục gemma vào thư mục models của LM Studio.",
     },
     {
         "id": "lm-studio",
@@ -71,6 +79,7 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 def ensure_storage_directories():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    FILES_DIR.mkdir(parents=True, exist_ok=True)
     SUBMISSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -109,14 +118,64 @@ def model_view_data():
                 option_item = dict(option)
                 path = model_path(option)
                 option_item["available"] = bool(path and path.is_file())
-                option_item["size"] = format_file_size(path.stat().st_size) if option_item["available"] else None
+                file_size = path.stat().st_size if option_item["available"] else None
+                option_item["size"] = format_file_size(file_size) if file_size is not None else None
+                option_item["requires_queue"] = bool(file_size is not None and file_size >= QUEUE_MIN_BYTES)
                 item["options"].append(option_item)
         else:
             path = model_path(model)
             item["available"] = bool(path and path.is_file())
-            item["size"] = format_file_size(path.stat().st_size) if item["available"] else None
+            file_size = path.stat().st_size if item["available"] else None
+            item["size"] = format_file_size(file_size) if file_size is not None else None
+            item["requires_queue"] = bool(file_size is not None and file_size >= QUEUE_MIN_BYTES)
         result.append(item)
     return result
+
+
+def public_file_path(filename):
+    """Return a safe path for a visible file directly inside FILES_DIR."""
+    if (
+        not filename
+        or Path(filename).name != filename
+        or filename.startswith(".")
+        or ":" in filename
+        or any(ord(char) < 32 for char in filename)
+    ):
+        return None
+
+    candidate = (FILES_DIR / filename).resolve()
+    try:
+        candidate.relative_to(FILES_DIR.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def public_file_view_data():
+    if not FILES_DIR.is_dir():
+        return []
+
+    result = []
+    for entry in FILES_DIR.iterdir():
+        path = public_file_path(entry.name)
+        if path is None or not path.is_file():
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        result.append(
+            {
+                "name": path.name,
+                "format": path.suffix.lstrip(".").upper() or "FILE",
+                "size": format_file_size(stat.st_size),
+                "modified": datetime.fromtimestamp(stat.st_mtime)
+                .astimezone()
+                .strftime("%d/%m/%Y %H:%M"),
+                "requires_queue": stat.st_size >= QUEUE_MIN_BYTES,
+            }
+        )
+    return sorted(result, key=lambda item: item["name"].casefold())
 
 
 def validation_error(message, status=400, form_data=None):
@@ -180,6 +239,27 @@ def download_page():
     )
 
 
+@app.get("/files")
+def files_page():
+    return render_template(
+        "files.html",
+        active_page="files",
+        files=public_file_view_data(),
+    )
+
+
+def files_error(message, status):
+    return (
+        render_template(
+            "files.html",
+            active_page="files",
+            files=public_file_view_data(),
+            error=message,
+        ),
+        status,
+    )
+
+
 def download_error(message, status):
     return (
         render_template(
@@ -190,6 +270,45 @@ def download_error(message, status):
         ),
         status,
     )
+
+
+def send_managed_download(path, filename, queue_denied_response):
+    """Send a file directly or reserve a queue slot for large downloads."""
+    file_size = path.stat().st_size
+    ticket = request.args.get("ticket", "")
+    if file_size < QUEUE_MIN_BYTES or request.method == "HEAD":
+        return send_file(
+            path,
+            as_attachment=True,
+            download_name=filename,
+            conditional=True,
+        )
+
+    if not download_queue.begin_download(ticket):
+        return queue_denied_response()
+
+    try:
+        response = send_file(
+            path,
+            as_attachment=True,
+            download_name=filename,
+            conditional=True,
+        )
+    except Exception:
+        download_queue.finish_download(ticket, complete=False)
+        raise
+
+    expected = response.content_length if response.content_length is not None else file_size
+    completes_file = _response_completes_file(response, file_size)
+    response.response = _TrackedStream(
+        response.response,
+        ticket,
+        expected,
+        completes_file,
+        download_queue,
+    )
+    response.direct_passthrough = True
+    return response
 
 
 def send_configured_download(model_id, option_id=None):
@@ -210,11 +329,29 @@ def send_configured_download(model_id, option_id=None):
     if path is None or not path.is_file():
         return download_error(f"Tệp {target['filename']} hiện chưa có trên máy chủ.", 404)
 
-    return send_file(
+    return send_managed_download(
         path,
-        as_attachment=True,
-        download_name=target["filename"],
-        conditional=True,
+        target["filename"],
+        lambda: download_error(
+            "Chưa tới lượt tải. Vui lòng quay lại trang tải model và bấm nút để xếp hàng.",
+            403,
+        ),
+    )
+
+
+@app.get("/files/<path:filename>")
+def download_public_file(filename):
+    path = public_file_path(filename)
+    if path is None or not path.is_file():
+        return files_error("Tệp được yêu cầu không tồn tại.", 404)
+
+    return send_managed_download(
+        path,
+        path.name,
+        lambda: files_error(
+            "Chưa tới lượt tải. Vui lòng quay lại trang tải tệp và bấm nút để xếp hàng.",
+            403,
+        ),
     )
 
 
@@ -225,6 +362,9 @@ def download_model(model_id):
         return download_error("Vui lòng chọn phiên bản LM Studio trước khi tải.", 400)
     return send_configured_download(model_id)
 
+@app.get("/queue/stats")
+def queue_stats():
+    return jsonify(download_queue.stats())
 
 @app.get("/download/<model_id>/<option_id>")
 def download_model_option(model_id, option_id):
@@ -373,6 +513,28 @@ def internal_error(_error):
         500,
     )
 
+@app.post("/queue/join")
+def queue_join():
+    payload = request.get_json(silent=True) or {}
+    client_id = str(payload.get("client_id", "")).strip()
+    if len(client_id) > 128 or any(ord(char) < 32 for char in client_id):
+        return jsonify({"error": "Mã trình duyệt không hợp lệ."}), 400
+
+    # client_id giup nhieu nguoi sau cung NAT/proxy van co ticket rieng.
+    owner_id = f"{request.remote_addr or 'unknown'}:{client_id or 'legacy'}"
+    return jsonify(download_queue.join(owner_id))
+
+
+@app.get("/queue/status")
+def queue_status():
+    return jsonify(download_queue.status(request.args.get("ticket", "")))
+
+
+@app.post("/queue/leave")
+def queue_leave():
+    released = download_queue.leave(request.args.get("ticket", ""))
+    return jsonify({"ok": released})
+
 
 def detect_lan_ip():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -387,11 +549,63 @@ def detect_lan_ip():
     finally:
         sock.close()
 
+def _response_completes_file(response, file_size):
+    """Return True when this response reaches the end of the requested file."""
+    content_range = response.headers.get("Content-Range", "")
+    if not content_range:
+        return 200 <= response.status_code < 300
 
+    try:
+        byte_range, total = content_range.removeprefix("bytes ").split("/", 1)
+        _start, end = byte_range.split("-", 1)
+        return int(total) == file_size and int(end) + 1 == file_size
+    except (TypeError, ValueError):
+        return False
+
+
+class _TrackedStream:
+    """Track a file iterable and always return its queue slot on close."""
+
+    def __init__(self, iterable, ticket, expected, completes_file, queue):
+        self._iterable = iterable
+        self._iterator = iter(iterable)
+        self._ticket = ticket
+        self._expected = expected
+        self._completes_file = completes_file
+        self._queue = queue
+        self._sent = 0
+        self._closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            chunk = next(self._iterator)
+        except StopIteration:
+            self.close()
+            raise
+        self._sent += len(chunk)
+        return chunk
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            closer = getattr(self._iterable, "close", None)
+            if closer is not None:
+                closer()
+        finally:
+            self._queue.finish_download(
+                self._ticket,
+                complete=self._completes_file and self._sent >= self._expected,
+            )
 if __name__ == "__main__":
     ensure_storage_directories()
     lan_ip = detect_lan_ip()
-    print("Model Hub running on:")
-    print("http://127.0.0.1:8080")
     print(f"LAN: http://{lan_ip}:8080")
-    app.run(host="0.0.0.0", port=8080, debug=False, threaded=True)
+
+    from waitress import serve
+    serve(app, host="0.0.0.0", port=8080, threads=32,
+          channel_timeout=1800, cleanup_interval=60)

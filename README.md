@@ -1,22 +1,19 @@
 # Model Hub
 
-Ứng dụng web nội bộ bằng Flask để:
+Ứng dụng web nội bộ bằng Flask để điều hướng, tải model AI/LM Studio, tải tệp được chia sẻ và nộp bài tập dạng `.zip`.
 
-- điều hướng từ trang chủ;
-- tải model AI và LM Studio;
-- nộp bài tập dạng `.zip`.
+Frontend dùng HTML5, CSS3 và JavaScript thuần; không có bước build.
 
-Giao diện dùng HTML, CSS và JavaScript thuần, không có bước build frontend.
+Các file từ 100 MB trở lên đi qua hàng đợi tải xuống. Mỗi trình duyệt nhận một ticket, thấy vị trí hiện tại và tự bắt đầu tải khi có slot trống. Mặc định máy chủ cho tối đa 10 ticket tải đồng thời.
 
 ## Yêu cầu
 
 - Python 3
 - Flask 3.x
+- Waitress 3.x
 - Mạng LAN nếu muốn truy cập từ máy khác
 
 ## Cài đặt
-
-Tại thư mục dự án, chạy:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -28,59 +25,86 @@ python -m pip install -r requirements.txt
 python server.py
 ```
 
-Server lắng nghe trên tất cả địa chỉ mạng tại cổng `8080`:
+Ứng dụng bind trên `0.0.0.0:8080`. Khi khởi động, terminal sẽ in ra địa chỉ local và địa chỉ LAN:
 
 ```text
 http://127.0.0.1:8080
 http://<LOCAL_IP>:8080
 ```
 
-Khi khởi động, terminal sẽ in ra địa chỉ LAN được phát hiện tự động. Máy khác trong cùng mạng có thể truy cập bằng địa chỉ đó.
+Máy khác trong cùng mạng có thể mở địa chỉ LAN được in ra.
 
-## Cấu trúc chính
+## Cấu trúc dự án
 
 ```text
 server.py                 # Flask backend và cấu hình model
 templates/                # Các trang HTML
 static/css/style.css      # Giao diện
-static/js/upload.js       # Tương tác form upload
-static/js/download.js     # Dropdown phiên bản LM Studio
-storage/models/           # File model và bộ cài cần tải
+static/js/upload.js       # Tương tác upload
+static/js/download.js     # Dropdown LM Studio và giao diện hàng đợi
+queue_manager.py          # Hàng đợi tải file thread-safe
+storage/models/           # Các archive/model được phép tải
+storage/files/            # Các tệp công khai trên trang tải tệp
 storage/submissions/      # Bài nộp và metadata
 ```
 
-## Thêm hoặc thay model
+## Chuẩn bị model để tải
 
-Khai báo model trong biến `MODELS` ở `server.py`. File phải nằm trực tiếp trong `storage/models/`.
+Các file model được chuẩn bị thủ công, không được ZIP trong lúc người dùng tải. Đặt archive đúng tên đã khai báo trong `MODELS` tại `storage/models/`.
 
-Model thông thường dùng các trường:
+Với Gemma, hãy tự tạo archive chứa cấu trúc thư mục sau:
+
+```text
+gemma3-high-model.zip
+└── gemma/
+    └── gemma3/
+        └── gemma-3-4b-it-Q4_K_M.gguf
+```
+
+Sau khi tải, người dùng giải nén rồi đặt cả thư mục `gemma` vào thư mục models của LM Studio.
+
+Model cấu hình trong `server.py` có dạng:
 
 ```python
 {
-    "id": "model1",
-    "name": "Tên model",
-    "description": "Mô tả",
-    "filename": "model-file.gguf",
-    "format": "GGUF",
-    "requirement": "RAM 8GB+",
-    "button_label": "Tải Model 1",
+    "id": "model2",
+    "name": "Gemma 3 - Máy mạnh",
+    "description": "Phiên bản lớn hơn, dành cho máy có cấu hình mạnh.",
+    "filename": "gemma3-high-model.zip",
+    "format": "ZIP",
+    "requirement": "RAM 16GB+",
+    "button_label": "Tải Model 2 (.zip)",
 }
 ```
 
-LM Studio dùng `options` để cung cấp nhiều phiên bản, chẳng hạn macOS và Windows. Dung lượng được tính tự động từ file thực tế; không cần khai báo kích thước giả.
+Dung lượng trên trang được lấy tự động từ archive thực tế. Nếu file chưa có, nút tải sẽ bị vô hiệu hóa và trang hiển thị thông báo rõ ràng.
 
-## Upload bài tập
+## LM Studio
 
-Trang `/upload` yêu cầu:
+LM Studio có dropdown chọn phiên bản:
 
-- Họ và tên;
-- MSSV;
-- Tên bài tập;
-- file `.zip` hợp lệ.
+- macOS Apple Silicon: file `.dmg`;
+- Windows 64-bit: file `.exe`.
 
-Giới hạn upload hiện tại là `200 MB`, cấu hình bởi `MAX_UPLOAD_MB` trong `server.py`. Server kiểm tra lại phần mở rộng, tên file, dung lượng và định dạng ZIP trước khi lưu.
+Các file cài đặt cũng phải nằm trong `storage/models/` và có tên khớp với cấu hình trong `MODELS`.
 
-Mỗi bài nộp được lưu theo mã riêng:
+## Tệp được chia sẻ
+
+Đặt tệp cần chia sẻ trực tiếp vào `storage/files/`. Trang `/files` tự động hiển thị tên, định dạng, dung lượng và thời gian cập nhật của từng tệp. Thư mục con và file ẩn không được công khai.
+
+Tệp dưới 100 MB được tải trực tiếp. Tệp từ 100 MB trở lên sử dụng chung hàng đợi tải xuống với model.
+
+## Nộp bài tập
+
+Trang `/upload` yêu cầu họ tên, MSSV, tên bài tập và file `.zip`. Server kiểm tra lại:
+
+- file có tồn tại và đúng đuôi `.zip`;
+- tên file không chứa đường dẫn nguy hiểm;
+- file không vượt quá `MAX_UPLOAD_MB` (mặc định 200 MB);
+- nội dung là ZIP hợp lệ;
+- các trường thông tin bắt buộc không bị bỏ trống.
+
+ZIP không được giải nén hoặc thực thi. Mỗi bài nộp được lưu riêng:
 
 ```text
 storage/submissions/<submission_id>/
@@ -88,22 +112,25 @@ storage/submissions/<submission_id>/
 └── metadata.json
 ```
 
-ZIP không được giải nén và không được thực thi.
-
 ## Các route chính
 
 ```text
-/                         Trang chủ
-/download                 Trang tải model
-/download/<model_id>      Tải model thông thường
-/download/lm-studio/macos Tải LM Studio cho macOS
-/download/lm-studio/windows Tải LM Studio cho Windows
-/upload                   Trang nộp bài
+/                            Trang chủ
+/download                    Trang tải model
+/download/<model_id>         Tải archive model
+/download/lm-studio/macos    Tải LM Studio cho macOS
+/download/lm-studio/windows  Tải LM Studio cho Windows
+/files                       Danh sách tệp được chia sẻ
+/files/<filename>            Tải một tệp trong storage/files
+/upload                      Trang nộp bài
+/queue/join                  Nhận ticket tải xuống
+/queue/status                Poll trạng thái/vị trí ticket
+/queue/leave                 Hủy ticket và trả slot
 ```
 
-## Lưu ý triển khai
+## Lưu ý vận hành
 
-- Đây là ứng dụng dùng trong mạng nội bộ, chưa có xác thực người dùng.
-- Cần đảm bảo máy chủ có đủ dung lượng cho các file model và bài nộp.
-- Với nhiều lượt tải model đồng thời, tốc độ sẽ phụ thuộc chủ yếu vào băng thông LAN, Wi-Fi và ổ đĩa máy chủ.
-- Không đặt file người dùng vào `storage/models/`; chỉ thêm các file được khai báo rõ trong `MODELS`.
+- Đây là ứng dụng mạng nội bộ và chưa có xác thực người dùng.
+- Cần đảm bảo đủ dung lượng cho archive model và bài nộp.
+- Tốc độ tải nhiều model đồng thời phụ thuộc vào băng thông LAN, Wi-Fi và ổ đĩa máy chủ.
+- Chỉ các file được khai báo rõ trong `MODELS` mới được phép tải.
