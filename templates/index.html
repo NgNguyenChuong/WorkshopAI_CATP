@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Trang chủ | Model Hub{% endblock %}
+{% block title %}Trang chủ | SGU{% endblock %}
 
 {% block content %}
 <section class="page-heading">
-    <p class="eyebrow">MODEL HUB</p>
-    <h1>Trang chủ</h1>
-    <p>Chọn thao tác bạn muốn thực hiện: tải model hoặc nộp file bài tập.</p>
+    <!-- <p class="eyebrow">SGU</p> -->
+    <h2>Trang chủ</h2>
+    <p>Chọn thao tác bạn muốn thực hiện: tải model, tải tài liệu hoặc nộp bài tập.</p>
 </section>
 
 <section class="action-grid" aria-label="Các thao tác">
@@ -20,6 +20,20 @@
         </div>
         <a class="button button-blue" href="{{ url_for('download_page') }}">
             Đi tới trang tải model
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg>
+        </a>
+    </article>
+
+    <article class="action-card action-card-purple">
+        <div class="icon-box icon-purple" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Zm8 0v5h4M9 13h6m-6 4h6"/></svg>
+        </div>
+        <div class="action-card-copy">
+            <h2>Tài liệu</h2>
+            <p>Tải các tệp được chia sẻ</p>
+        </div>
+        <a class="button button-purple" href="{{ url_for('files_page') }}">
+            Đi tới trang tải tệp
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6"/></svg>
         </a>
     </article>

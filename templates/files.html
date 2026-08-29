@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Tải tệp | SGU{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <h2>Tải tệp</h2>
+    <p>Chọn tài liệu hoặc tệp bạn cần và tải xuống máy.</p>
+</section>
+
+{% if error %}
+<div class="alert alert-error" role="alert">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 3h.01M10.3 4.5 3.5 17a2 2 0 0 0 1.75 3h13.5a2 2 0 0 0 1.75-3L13.7 4.5a2 2 0 0 0-3.4 0Z"/></svg>
+    <span>{{ error }}</span>
+</div>
+{% endif %}
+
+{% include "_queue_panel.html" %}
+
+<section class="file-library" aria-labelledby="file-library-title">
+    <div class="file-library-heading">
+        <div>
+            <p class="eyebrow">THƯ VIỆN</p>
+            <h2 id="file-library-title">Danh sách tệp</h2>
+        </div>
+        <span>{{ files|length }} tệp</span>
+    </div>
+
+    {% if files %}
+    <ul class="file-list">
+        {% for file in files %}
+        <li class="file-row">
+            <div class="file-type" aria-hidden="true">{{ file.format }}</div>
+            <div class="file-info">
+                <h3>{{ file.name }}</h3>
+                <p>{{ file.size }} · Cập nhật {{ file.modified }}</p>
+            </div>
+            <a class="button button-blue"
+                data-download-link
+                data-queue-required="{{ 'true' if file.requires_queue else 'false' }}"
+                href="{{ url_for('download_public_file', filename=file.name) }}">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v10m0 0 3.5-3.5M10 12 6.5 8.5M3 15v2h14v-2"/></svg>
+                Tải xuống
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="file-empty">
+        <span class="file-empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Zm8 0v5h4"/></svg>
+        </span>
+        <h3>Chưa có tệp để tải</h3>
+        <p>Tệp sẽ xuất hiện tại đây sau khi được thêm vào hệ thống.</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/download.js') }}" defer></script>
+{% endblock %}
