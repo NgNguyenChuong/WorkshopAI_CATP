@@ -3,7 +3,8 @@ import os
 import secrets
 import socket
 import tempfile
-import zipfile
+import threading
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +25,11 @@ SUBMISSIONS_DIR = BASE_DIR / "storage" / "submissions"
 
 MAX_UPLOAD_MB = 200
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_UPLOAD_FILES = 5
+
+# Bao ve viec cap STT, chon ten file va cap nhat metadata khi Waitress xu ly
+# nhieu yeu cau upload tren cac thread khac nhau.
+submission_lock = threading.Lock()
 
 # Thay doi cac gia tri o day khi can cap nhat model.
 MODELS = [
@@ -186,6 +192,7 @@ def validation_error(message, status=400, form_data=None):
             error=message,
             form_data=form_data or {},
             max_upload_mb=MAX_UPLOAD_MB,
+            max_upload_files=MAX_UPLOAD_FILES,
         ),
         status,
     )
@@ -207,22 +214,135 @@ def valid_upload_filename(filename):
         return False
     if "/" in filename or "\\" in filename or any(ord(char) < 32 for char in filename):
         return False
-    if Path(filename).suffix.lower() != ".zip":
-        return False
-    return bool(secure_filename(filename))
+    return filename not in {".", ".."}
 
 
-def new_submission_directory():
-    for _ in range(10):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        submission_id = f"{timestamp}_{secrets.token_hex(3)}"
-        directory = SUBMISSIONS_DIR / submission_id
+def identity_key(value):
+    """Normalize text used to recognize the same student on later uploads."""
+    return " ".join(unicodedata.normalize("NFKC", value).split()).casefold()
+
+
+def student_folder_slug(student_name):
+    """Build a readable, filesystem-safe HoVaTen part for the folder name."""
+    value = student_name.replace("Đ", "D").replace("đ", "d")
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    slug = secure_filename(value).strip("._")
+    return slug[:100] or "Nguoi_Dung"
+
+
+def read_metadata(directory):
+    metadata_path = directory / "metadata.json"
+    try:
+        data = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def find_or_create_student_directory(student_name, group):
+    """Reuse a student's folder, or allocate the next positive STT."""
+    name_key = identity_key(student_name)
+    group_key = identity_key(group)
+    used_numbers = set()
+
+    for directory in SUBMISSIONS_DIR.iterdir():
+        if not directory.is_dir():
+            continue
+
+        prefix = directory.name.partition("_")[0]
+        if prefix.isdigit() and len(prefix) <= 6:
+            used_numbers.add(int(prefix))
+
+        metadata = read_metadata(directory)
+        if not metadata or "group" not in metadata:
+            continue
+        if (
+            identity_key(str(metadata.get("student_name", ""))) == name_key
+            and identity_key(str(metadata.get("group", ""))) == group_key
+        ):
+            student_number = metadata.get("student_number")
+            if not isinstance(student_number, int) or student_number < 1:
+                if not prefix.isdigit():
+                    continue
+                student_number = int(prefix)
+            return student_number, directory, metadata, False
+
+    student_number = 1
+    while student_number in used_numbers:
+        student_number += 1
+
+    slug = student_folder_slug(student_name)
+    while True:
+        directory = SUBMISSIONS_DIR / f"{student_number:03d}_{slug}"
         try:
             directory.mkdir()
-            return submission_id, directory
+            break
         except FileExistsError:
-            continue
-    raise RuntimeError("Không thể tạo mã bài nộp duy nhất.")
+            student_number += 1
+
+    created_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    metadata = {
+        "storage_version": 2,
+        "student_number": student_number,
+        "student_name": student_name,
+        "group": group,
+        "directory": directory.name,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "uploads": [],
+    }
+    return student_number, directory, metadata, True
+
+
+def safe_storage_filename(original_filename, fallback_number):
+    safe_name = secure_filename(original_filename)
+    safe_extension_name = secure_filename(f"file{Path(original_filename).suffix}")
+    safe_suffix = Path(safe_extension_name).suffix
+    if safe_suffix and not Path(safe_name).suffix:
+        safe_stem = secure_filename(Path(original_filename).stem)
+        safe_name = f"{safe_stem or f'file_{fallback_number}'}{safe_suffix}"
+    if not safe_name:
+        safe_name = f"file_{fallback_number}{safe_suffix}"
+
+    if len(safe_name) > 180:
+        suffix = Path(safe_name).suffix[:20]
+        stem_limit = max(1, 180 - len(suffix))
+        safe_name = f"{Path(safe_name).stem[:stem_limit]}{suffix}"
+    return safe_name
+
+
+def unique_storage_path(directory, filename):
+    candidate = directory / filename
+    stem = candidate.stem or "file"
+    suffix = candidate.suffix
+    counter = 2
+    reserved_name = "metadata.json"
+
+    while candidate.exists() or candidate.name.casefold() == reserved_name:
+        candidate = directory / f"{stem}_{counter}{suffix}"
+        counter += 1
+    return candidate
+
+
+def write_metadata_atomic(directory, metadata):
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            prefix=".metadata-",
+            suffix=".tmp",
+            dir=directory,
+            encoding="utf-8",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            json.dump(metadata, temp_file, ensure_ascii=False, indent=2)
+        os.replace(temp_path, directory / "metadata.json")
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 @app.get("/")
@@ -378,110 +498,163 @@ def upload_page():
             "upload.html",
             active_page="upload",
             max_upload_mb=MAX_UPLOAD_MB,
+            max_upload_files=MAX_UPLOAD_FILES,
         )
 
     form_data = {
         "student_name": request.form.get("student_name", "").strip(),
-        "student_id": request.form.get("student_id", "").strip(),
-        "assignment": request.form.get("assignment", "").strip(),
+        "group": request.form.get("group", "").strip(),
     }
 
     student_name, error = clean_text(form_data["student_name"], "họ và tên", 120)
     if error:
         return validation_error(error, form_data=form_data)
 
-    student_id, error = clean_text(form_data["student_id"], "MSSV", 50)
+    group, error = clean_text(form_data["group"], "nhóm", 50)
     if error:
         return validation_error(error, form_data=form_data)
 
-    assignment, error = clean_text(form_data["assignment"], "tên bài tập", 120)
-    if error:
-        return validation_error(error, form_data=form_data)
-
-    uploaded_file = request.files.get("submission_file")
-    if uploaded_file is None or not uploaded_file.filename:
-        return validation_error("Vui lòng chọn file .zip cần nộp.", form_data=form_data)
-
-    original_filename = uploaded_file.filename
-    if not valid_upload_filename(original_filename):
+    uploaded_files = [
+        uploaded_file
+        for uploaded_file in request.files.getlist("submission_files")
+        if uploaded_file and uploaded_file.filename
+    ]
+    if not uploaded_files:
+        return validation_error("Vui lòng chọn ít nhất một file cần nộp.", form_data=form_data)
+    if len(uploaded_files) > MAX_UPLOAD_FILES:
         return validation_error(
-            "Tên file không hợp lệ. Chỉ chấp nhận file có đuôi .zip và không chứa đường dẫn.",
+            f"Mỗi lần chỉ được nộp tối đa {MAX_UPLOAD_FILES} file.",
             form_data=form_data,
         )
 
+    for uploaded_file in uploaded_files:
+        if not valid_upload_filename(uploaded_file.filename):
+            return validation_error(
+                f"Tên file “{uploaded_file.filename}” không hợp lệ hoặc chứa đường dẫn.",
+                form_data=form_data,
+            )
+
     ensure_storage_directories()
-    temp_path = None
-    submission_dir = None
+    staged_files = []
 
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb", prefix=".upload-", suffix=".tmp", dir=SUBMISSIONS_DIR, delete=False
-        ) as temp_file:
-            temp_path = Path(temp_file.name)
-            uploaded_file.save(temp_file)
+        for uploaded_file in uploaded_files:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                prefix=".upload-",
+                suffix=".tmp",
+                dir=SUBMISSIONS_DIR,
+                delete=False,
+            ) as temp_file:
+                temp_path = Path(temp_file.name)
+                staged_item = {
+                    "temp_path": temp_path,
+                    "original_filename": uploaded_file.filename,
+                    "size_bytes": 0,
+                }
+                staged_files.append(staged_item)
+                uploaded_file.save(temp_file)
 
-        uploaded_size = temp_path.stat().st_size
-        if uploaded_size > MAX_UPLOAD_BYTES:
+            uploaded_size = temp_path.stat().st_size
+            staged_item["size_bytes"] = uploaded_size
+
+            if uploaded_size == 0:
+                return validation_error(
+                    f"File “{uploaded_file.filename}” không được để trống.",
+                    form_data=form_data,
+                )
+
+        total_size = sum(item["size_bytes"] for item in staged_files)
+        if total_size > MAX_UPLOAD_BYTES:
             return validation_error(
-                f"File vượt quá giới hạn {MAX_UPLOAD_MB} MB.",
+                f"Tổng dung lượng file vượt quá giới hạn {MAX_UPLOAD_MB} MB.",
                 status=413,
                 form_data=form_data,
             )
-        if uploaded_size == 0 or not zipfile.is_zipfile(temp_path):
-            return validation_error(
-                "File đã chọn không phải là file ZIP hợp lệ.",
-                form_data=form_data,
+
+        with submission_lock:
+            student_number, submission_dir, metadata, created = (
+                find_or_create_student_directory(student_name, group)
             )
+            moved_paths = []
+            try:
+                stored_files = []
+                for index, item in enumerate(staged_files, start=1):
+                    safe_name = safe_storage_filename(item["original_filename"], index)
+                    stored_path = unique_storage_path(submission_dir, safe_name)
+                    os.replace(item["temp_path"], stored_path)
+                    item["temp_path"] = None
+                    moved_paths.append(stored_path)
+                    stored_files.append(
+                        {
+                            "original_filename": item["original_filename"],
+                            "stored_filename": stored_path.name,
+                            "size_bytes": item["size_bytes"],
+                        }
+                    )
 
-        submission_id, submission_dir = new_submission_directory()
-        stored_path = submission_dir / "submission.zip"
-        os.replace(temp_path, stored_path)
-        temp_path = None
-
-        uploaded_at = datetime.now().astimezone().isoformat(timespec="seconds")
-        metadata = {
-            "submission_id": submission_id,
-            "student_name": student_name,
-            "student_id": student_id,
-            "assignment": assignment,
-            "original_filename": original_filename,
-            "stored_filename": "submission.zip",
-            "uploaded_at": uploaded_at,
-        }
-        metadata_path = submission_dir / "metadata.json"
-        metadata_path.write_text(
-            json.dumps(metadata, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+                uploaded_at = datetime.now().astimezone().isoformat(timespec="seconds")
+                upload_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{secrets.token_hex(3)}"
+                uploads = metadata.get("uploads")
+                if not isinstance(uploads, list):
+                    uploads = []
+                    metadata["uploads"] = uploads
+                uploads.append(
+                    {
+                        "upload_id": upload_id,
+                        "uploaded_at": uploaded_at,
+                        "files": stored_files,
+                    }
+                )
+                metadata.update(
+                    {
+                        "storage_version": 2,
+                        "student_number": student_number,
+                        "student_name": student_name,
+                        "group": group,
+                        "directory": submission_dir.name,
+                        "updated_at": uploaded_at,
+                    }
+                )
+                write_metadata_atomic(submission_dir, metadata)
+            except Exception:
+                for moved_path in moved_paths:
+                    moved_path.unlink(missing_ok=True)
+                if created:
+                    try:
+                        submission_dir.rmdir()
+                    except OSError:
+                        pass
+                raise
 
         return render_template(
             "upload.html",
             active_page="upload",
             success=True,
-            submission_id=submission_id,
+            submission_directory=submission_dir.name,
+            uploaded_files=stored_files,
             max_upload_mb=MAX_UPLOAD_MB,
+            max_upload_files=MAX_UPLOAD_FILES,
         )
     except RequestEntityTooLarge:
         raise
     except Exception:
-        if submission_dir is not None:
-            for child in submission_dir.iterdir():
-                child.unlink(missing_ok=True)
-            submission_dir.rmdir()
         return validation_error(
             "Không thể lưu bài nộp. Vui lòng thử lại.",
             status=500,
             form_data=form_data,
         )
     finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+        for item in staged_files:
+            temp_path = item.get("temp_path")
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
 
 
 @app.errorhandler(413)
 def upload_too_large(_error):
     return validation_error(
-        f"File vượt quá giới hạn {MAX_UPLOAD_MB} MB.",
+        f"Tổng dung lượng tải lên vượt quá giới hạn {MAX_UPLOAD_MB} MB.",
         status=413,
     )
 
