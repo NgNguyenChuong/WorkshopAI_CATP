@@ -1,6 +1,6 @@
 # Model Hub
 
-Ứng dụng web nội bộ bằng Flask để điều hướng, tải model AI/LM Studio, tải tệp được chia sẻ và nộp bài tập dạng `.zip`.
+Ứng dụng web nội bộ bằng Flask để điều hướng, tải model AI/LM Studio, tải tệp được chia sẻ và nộp bài tập.
 
 Frontend dùng HTML5, CSS3 và JavaScript thuần; không có bước build.
 
@@ -96,19 +96,21 @@ Tệp dưới 100 MB được tải trực tiếp. Tệp từ 100 MB trở lên 
 
 ## Nộp bài tập
 
-Trang `/upload` yêu cầu họ tên, MSSV, tên bài tập và file `.zip`. Server kiểm tra lại:
+Trang `/upload` yêu cầu họ tên, nhóm và từ 1 đến 5 file. Có thể nộp hình ảnh, video hoặc các định dạng file khác. Server kiểm tra lại:
 
-- file có tồn tại và đúng đuôi `.zip`;
+- mỗi lần có tối đa `MAX_UPLOAD_FILES` file (mặc định 5);
 - tên file không chứa đường dẫn nguy hiểm;
-- file không vượt quá `MAX_UPLOAD_MB` (mặc định 200 MB);
-- nội dung là ZIP hợp lệ;
+- file không rỗng;
+- tổng request không vượt quá `MAX_UPLOAD_MB` (mặc định 200 MB);
 - các trường thông tin bắt buộc không bị bỏ trống.
 
-ZIP không được giải nén hoặc thực thi. Mỗi bài nộp được lưu riêng:
+Lần đầu một người dùng nộp bài, hệ thống tự cấp STT và tạo thư mục theo tên. Các lần sau có cùng họ tên và nhóm sẽ dùng lại thư mục đó. File trùng tên được thêm hậu tố `_2`, `_3`, ... thay vì ghi đè:
 
 ```text
-storage/submissions/<submission_id>/
-├── submission.zip
+storage/submissions/001_Nguyen_Van_An/
+├── bai-lam.docx
+├── video.mp4
+├── video_2.mp4
 └── metadata.json
 ```
 

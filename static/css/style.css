@@ -33,7 +33,7 @@ body {
     color: var(--ink);
     background: var(--surface);
     font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-    font-size: 16px;
+    font-size: 20px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
 }
@@ -123,7 +123,7 @@ a {
     margin: 0 auto;
     padding: 22px 0;
     color: #164e73;
-    font-size: clamp(18px, 2vw, 23px);
+    font-size: clamp(18px, 2vw, 24px);
     font-weight: 850;
     line-height: 1.35;
     letter-spacing: 0.015em;
@@ -164,7 +164,7 @@ a {
 .page-heading > p:last-child {
     margin: 0;
     color: var(--muted);
-    font-size: 17px;
+    font-size: 20px;
 }
 
 .action-grid,
@@ -285,7 +285,7 @@ a {
     border: 1px solid transparent;
     border-radius: 9px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 700;
     line-height: 1.2;
     transition: background-color 150ms ease, border-color 150ms ease, transform 150ms ease;
@@ -446,7 +446,7 @@ a {
 
 .model-details dt {
     color: var(--muted);
-    font-size: 13px;
+    font-size: 16px;
 }
 
 .model-details dd {
@@ -907,6 +907,37 @@ a {
     font-size: 12px;
 }
 
+.selected-file-list {
+    margin: 10px 0 0;
+    padding: 9px 0 0;
+    display: grid;
+    gap: 7px;
+    list-style: none;
+    border-top: 1px solid rgba(90, 122, 108, 0.2);
+}
+
+.selected-file-list li {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.selected-file-list li span {
+    overflow: hidden;
+    color: #29463a;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.selected-file-list li small {
+    flex: 0 0 auto;
+    color: #5a7a6c;
+    font-size: 11px;
+}
+
 .remove-file {
     width: 36px;
     height: 36px;
@@ -991,6 +1022,26 @@ a {
     color: #344054;
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
     font-size: 14px;
+}
+
+.success-file-list {
+    width: min(100%, 480px);
+    margin: -14px auto 28px;
+    padding: 0;
+    display: grid;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 13px;
+    list-style: none;
+}
+
+.success-file-list li {
+    overflow-wrap: anywhere;
+}
+
+#submit-upload[aria-busy="true"] {
+    cursor: wait;
+    opacity: 0.7;
 }
 
 .error-page {

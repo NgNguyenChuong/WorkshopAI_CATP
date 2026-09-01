@@ -3,15 +3,18 @@
     const input = document.querySelector("#submission-file");
     const dropZone = document.querySelector("#drop-zone");
     const selectedFile = document.querySelector("#selected-file");
-    const selectedName = document.querySelector("#selected-file-name");
+    const selectedSummary = document.querySelector("#selected-file-summary");
     const selectedSize = document.querySelector("#selected-file-size");
+    const selectedList = document.querySelector("#selected-file-list");
     const removeButton = document.querySelector("#remove-file");
     const clearButton = document.querySelector("#clear-file");
     const fileError = document.querySelector("#file-error");
+    const submitButton = document.querySelector("#submit-upload");
 
     if (!form || !input || !dropZone) return;
 
     const maxBytes = Number(input.dataset.maxBytes);
+    const maxFiles = Number(input.dataset.maxFiles);
 
     function formatSize(bytes) {
         if (bytes < 1024) return `${bytes} B`;
@@ -40,38 +43,58 @@
     function clearFile() {
         input.value = "";
         selectedFile.hidden = true;
-        selectedName.textContent = "";
+        selectedSummary.textContent = "";
         selectedSize.textContent = "";
+        selectedList.replaceChildren();
         clearButton.disabled = true;
         dropZone.hidden = false;
         clearError();
     }
 
-    function validateFile(file) {
-        if (!file) return "Vui lòng chọn file .zip cần nộp.";
-        if (!file.name.toLowerCase().endsWith(".zip")) return "Chỉ chấp nhận file có đuôi .zip.";
-        if (file.size > maxBytes) return `File vượt quá giới hạn ${Math.round(maxBytes / 1024 / 1024)} MB.`;
-        if (file.size === 0) return "File không được để trống.";
+    function validateFiles(files) {
+        if (!files.length) return "Vui lòng chọn ít nhất một file cần nộp.";
+        if (files.length > maxFiles) return `Mỗi lần chỉ được chọn tối đa ${maxFiles} file.`;
+
+        const emptyFile = files.find((file) => file.size === 0);
+        if (emptyFile) return `File “${emptyFile.name}” không được để trống.`;
+
+        const totalBytes = files.reduce((total, file) => total + file.size, 0);
+        if (totalBytes > maxBytes) {
+            return `Tổng dung lượng file vượt quá giới hạn ${Math.round(maxBytes / 1024 / 1024)} MB.`;
+        }
         return "";
     }
 
-    function displayFile(file) {
-        const error = validateFile(file);
+    function displayFiles(fileList) {
+        const files = Array.from(fileList);
+        const error = validateFiles(files);
         if (error) {
             clearFile();
             showError(error);
             return false;
         }
         clearError();
-        selectedName.textContent = file.name;
-        selectedSize.textContent = formatSize(file.size);
+        const totalBytes = files.reduce((total, file) => total + file.size, 0);
+        selectedSummary.textContent = `${files.length} file đã chọn`;
+        selectedSize.textContent = `Tổng dung lượng: ${formatSize(totalBytes)}`;
+        selectedList.replaceChildren(
+            ...files.map((file) => {
+                const item = document.createElement("li");
+                const name = document.createElement("span");
+                const size = document.createElement("small");
+                name.textContent = file.name;
+                size.textContent = formatSize(file.size);
+                item.append(name, size);
+                return item;
+            }),
+        );
         selectedFile.hidden = false;
         dropZone.hidden = true;
         clearButton.disabled = false;
         return true;
     }
 
-    input.addEventListener("change", () => displayFile(input.files[0]));
+    input.addEventListener("change", () => displayFiles(input.files));
 
     ["dragenter", "dragover"].forEach((eventName) => {
         dropZone.addEventListener(eventName, (event) => {
@@ -88,12 +111,12 @@
     });
 
     dropZone.addEventListener("drop", (event) => {
-        const file = event.dataTransfer.files[0];
-        if (!file) return;
+        const files = Array.from(event.dataTransfer.files);
+        if (!files.length) return;
         const transfer = new DataTransfer();
-        transfer.items.add(file);
+        files.forEach((file) => transfer.items.add(file));
         input.files = transfer.files;
-        displayFile(file);
+        displayFiles(input.files);
     });
 
     dropZone.addEventListener("keydown", (event) => {
@@ -107,12 +130,15 @@
     clearButton.addEventListener("click", clearFile);
 
     form.addEventListener("submit", (event) => {
-        const file = input.files[0];
-        const error = validateFile(file);
+        const error = validateFiles(Array.from(input.files));
         if (error) {
             event.preventDefault();
             showError(error);
-            if (!file) dropZone.hidden = false;
+            if (!input.files.length) dropZone.hidden = false;
+            return;
         }
+
+        submitButton.disabled = true;
+        submitButton.setAttribute("aria-busy", "true");
     });
 })();
